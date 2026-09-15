@@ -96,6 +96,20 @@ proof because different accounts can share the same group or channel history.
 `--adopt-source` cannot override a different already-canonical source and cannot
 be combined with `--restore`.
 
+Large native Postbox databases may contain an all-zero SQLite reserved locking
+page at the 1 GiB boundary. Imports preserve that reserved page and continue to
+authenticate every data page; other zero pages or invalid HMACs abort the import.
+Native decryption still loads the database into memory, so large sources require
+substantial available RAM.
+
+Maintainers can reproduce the locking-page import with a generated synthetic
+database (more than 1 GiB of disk and several GiB of RAM):
+
+```bash
+make build
+TELECRAWL_LOCKING_PROOF_BINARY="$PWD/bin/telecrawl" go test -count=1 -timeout=10m -v ./internal/telegramdesktop -run '^TestSQLCipherLockingPageCLI$'
+```
+
 Native Postbox imports require a decodable authorized account peer ID. A shared
 lane encryption key is not account identity; missing or malformed account state
 now stops the import before archive writes. Existing archives bound by older

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve SQLite's all-zero reserved locking page during native SQLCipher imports while continuing to authenticate data pages. (#39, #40; thanks @n0an for the report and @goutamadwant for the fix)
+
 ## 0.4.0 - 2026-09-13
 
 **Highlights:** Safer Telegram imports and encrypted backups preserve archive data and account boundaries; source builds now require Go 1.27, and new macOS builds require macOS 13.

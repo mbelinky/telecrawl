@@ -24,6 +24,7 @@ const (
 	sqlcipherMinPageSize   = 512
 	sqlcipherMaxPageSize   = 65536
 	sqlcipherDefaultPageSz = 4096
+	sqlitePendingByte      = 0x40000000
 )
 
 func DecryptSQLCipherV4(data []byte, keyAndSalt []byte) ([]byte, error) {
@@ -61,7 +62,7 @@ func DecryptSQLCipherV4(data []byte, keyAndSalt []byte) ([]byte, error) {
 			offset = sqlcipherPlainHeader
 			copy(dst[:offset], page[:offset])
 		}
-		if err := decryptSQLCipherPage(block, hmacKey, pageNo, page[offset:], dst[offset:]); err != nil {
+		if err := decryptSQLCipherPage(block, hmacKey, pageNo, pageSize, page[offset:], dst[offset:]); err != nil {
 			return nil, err
 		}
 	}
@@ -89,9 +90,13 @@ func sqlcipherPageSize(data []byte) (int, error) {
 	return 0, fmt.Errorf("sqlcipher database does not expose a plaintext SQLite header")
 }
 
-func decryptSQLCipherPage(block cipher.Block, hmacKey []byte, pageNo uint32, page []byte, dst []byte) error {
+func decryptSQLCipherPage(block cipher.Block, hmacKey []byte, pageNo uint32, pageSize int, page []byte, dst []byte) error {
 	if len(page) != len(dst) {
 		return fmt.Errorf("page output length mismatch")
+	}
+	if isZeroSQLiteLockingPage(pageNo, pageSize, page) {
+		clear(dst)
+		return nil
 	}
 	payloadSize := len(page) - sqlcipherReserveSize
 	if payloadSize < 0 || payloadSize%aes.BlockSize != 0 {
@@ -110,6 +115,20 @@ func decryptSQLCipherPage(block cipher.Block, hmacKey []byte, pageNo uint32, pag
 	copy(dst[payloadSize:], page[payloadSize:])
 	cipher.NewCBCDecrypter(block, page[ivStart:hmacStart]).CryptBlocks(dst[:payloadSize], page[:payloadSize])
 	return nil
+}
+
+func isZeroSQLiteLockingPage(pageNo uint32, pageSize int, page []byte) bool {
+	// SQLite never allocates the page containing its fixed pending-lock byte.
+	// Only this entire zero page is exempt; data pages must authenticate.
+	if pageSize <= 0 || len(page) != pageSize || pageNo != uint32(sqlitePendingByte/pageSize)+1 {
+		return false
+	}
+	for _, b := range page {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sqlcipherHMACKey(encKey []byte, salt []byte) []byte {
