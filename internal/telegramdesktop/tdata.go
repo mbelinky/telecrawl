@@ -428,7 +428,56 @@ func (s *tdataImportSession) senderInfo(msg tg.NotEmptyMessage, ents peer.Entiti
 }
 
 func (s *tdataImportSession) downloadMessageMedia(ctx context.Context, elem querymessages.Elem, chatID string) (string, int64, string) {
+	if !remoteMediaFetchAllowed(elem, s.opts, time.Now()) {
+		return "", 0, "unavailable"
+	}
 	return downloadTelegramMessageMedia(ctx, s.raw, elem, s.mediaTempDir, fmt.Sprintf("%s:%d", chatID, elem.Msg.GetID()))
+}
+
+// remoteMediaFetchAllowed applies the optional --fetch-media bounds: a maximum
+// message age and a maximum declared file size. Unset bounds allow everything.
+func remoteMediaFetchAllowed(elem querymessages.Elem, opts ImportOptions, now time.Time) bool {
+	msg, ok := elem.Msg.(*tg.Message)
+	if !ok {
+		return true
+	}
+	if opts.FetchMediaMaxAge > 0 && now.Sub(time.Unix(int64(msg.Date), 0)) > opts.FetchMediaMaxAge {
+		return false
+	}
+	if opts.FetchMediaMaxBytes > 0 {
+		if size := telegramMessageMediaSize(msg); size > opts.FetchMediaMaxBytes {
+			return false
+		}
+	}
+	return true
+}
+
+// telegramMessageMediaSize returns the declared size of a message's document
+// or largest photo, or 0 when Telegram does not declare one.
+func telegramMessageMediaSize(msg *tg.Message) int64 {
+	switch media := msg.Media.(type) {
+	case *tg.MessageMediaDocument:
+		if media.Document == nil {
+			return 0
+		}
+		if doc, ok := media.Document.AsNotEmpty(); ok {
+			return doc.Size
+		}
+	case *tg.MessageMediaPhoto:
+		if media.Photo == nil {
+			return 0
+		}
+		if photo, ok := media.Photo.AsNotEmpty(); ok {
+			var largest int64
+			for _, size := range photo.Sizes {
+				if sized, ok := size.(*tg.PhotoSize); ok && int64(sized.Size) > largest {
+					largest = int64(sized.Size)
+				}
+			}
+			return largest
+		}
+	}
+	return 0
 }
 
 func downloadTelegramMessageMedia(ctx context.Context, raw *tg.Client, elem querymessages.Elem, mediaTempDir, key string) (string, int64, string) {
