@@ -464,7 +464,20 @@ func downloadTelegramMessageMedia(ctx context.Context, raw *tg.Client, elem quer
 	return outputPath, info.Size(), ""
 }
 
-func telegramMessageFile(elem querymessages.Elem) (querymessages.File, bool) {
+// telegramMessageFile resolves the downloadable file behind a message, if any.
+// gotd's Elem.File dereferences media fields that some messages leave nil,
+// which surfaced as a nil-pointer panic during --fetch-media; such a message
+// simply has no file to download.
+func telegramMessageFile(elem querymessages.Elem) (file querymessages.File, ok bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			file, ok = querymessages.File{}, false
+		}
+	}()
+	return telegramMessageFileFromElem(elem)
+}
+
+func telegramMessageFileFromElem(elem querymessages.Elem) (querymessages.File, bool) {
 	if file, ok := elem.File(); ok {
 		return file, true
 	}
